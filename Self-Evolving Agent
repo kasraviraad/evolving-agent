@@ -1,0 +1,83 @@
+import os
+import asyncio
+from anthropic import AsyncAnthropic
+import importlib
+
+class SelfEvolvingAgent:
+    def __init__(self, api_key):
+        self.client = AsyncAnthropic(api_key=api_key)
+        self.version = 1
+
+    async def get_claude_response(self, prompt):
+        response = await self.client.completions.create(
+            model="claude-3-opus-20240229",
+            max_tokens_to_sample=2000,
+            prompt=f"Human: {prompt}\n\nAssistant:"
+        )
+        return response.completion
+
+    async def update_or_generate_code(self, prompt):
+        code_prompt = f"""
+        Based on the following prompt, either update the existing SelfEvolvingAgent class or generate a new module to be imported by the agent. If updating, provide the full updated class. If generating a new module, provide the full module code.
+
+        Prompt: {prompt}
+
+        Current SelfEvolvingAgent class:
+
+        {self.__class__.__source__}
+
+        Respond with:
+        UPDATE if updating the main class, or
+        NEW_MODULE: module_name if creating a new module, followed by the code.
+        """
+
+        response = await self.get_claude_response(code_prompt)
+        
+        if response.strip().startswith("UPDATE"):
+            await self.update_self(response.strip()[7:])  # Remove "UPDATE\n"
+        elif response.strip().startswith("NEW_MODULE"):
+            module_name = response.split('\n')[0].split(': ')[1]
+            module_code = '\n'.join(response.split('\n')[1:])
+            await self.create_new_module(module_name, module_code)
+        else:
+            print("Unexpected response format from Claude.")
+
+    async def update_self(self, new_code):
+        self.version += 1
+        new_file_name = f"self_evolving_agent_v{self.version}.py"
+        
+        with open(new_file_name, 'w') as f:
+            f.write(new_code)
+        
+        print(f"Updated to version {self.version}. Saved as {new_file_name}")
+        
+        # Restart the script to use the new version
+        os.execv(sys.executable, ['python'] + sys.argv)
+
+    async def create_new_module(self, module_name, module_code):
+        with open(f"{module_name}.py", 'w') as f:
+            f.write(module_code)
+        
+        print(f"Created new module: {module_name}.py")
+        
+        # Import the new module
+        try:
+            new_module = importlib.import_module(module_name)
+            print(f"Successfully imported {module_name}")
+        except ImportError as e:
+            print(f"Error importing new module: {e}")
+
+    async def run(self):
+        while True:
+            prompt = input("Enter a prompt to evolve the agent (or 'exit' to quit): ")
+            if prompt.lower() == 'exit':
+                break
+            await self.update_or_generate_code(prompt)
+
+async def main():
+    api_key = "YOUR_ANTHROPIC_API_KEY"  # Replace with your actual API key
+    agent = SelfEvolvingAgent(api_key)
+    await agent.run()
+
+if __name__ == "__main__":
+    asyncio.run(main())
